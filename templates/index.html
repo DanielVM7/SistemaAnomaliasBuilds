@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="description"
+        content="Sistema de detección de anomalías en la duración de builds mediante el método IQR."
+    >
+
+    <title>
+        Sistema de detección de anomalías
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='css/estilos.css') }}"
+    >
+</head>
+
+<body>
+
+    <header class="encabezado">
+        <div class="contenedor">
+            <p class="etiqueta-proyecto">
+                Proyecto de estancia TSU
+            </p>
+
+            <h1>
+                Sistema de detección de anomalías
+                en la duración de builds
+            </h1>
+
+            <p class="descripcion-principal">
+                Carga un archivo CSV para analizar la duración
+                de los builds, detectar valores atípicos mediante
+                el rango intercuartílico y generar un reporte
+                completo con visualizaciones.
+            </p>
+        </div>
+    </header>
+
+    <main class="contenedor contenido-principal">
+
+        <section
+            class="tarjeta seccion-carga"
+            aria-labelledby="titulo-carga"
+        >
+            <div class="encabezado-seccion">
+                <div>
+                    <p class="numero-seccion">
+                        Paso 1
+                    </p>
+
+                    <h2 id="titulo-carga">
+                        Cargar dataset
+                    </h2>
+                </div>
+            </div>
+
+            <form
+                method="POST"
+                action="{{ url_for('index') }}"
+                enctype="multipart/form-data"
+                class="formulario-carga"
+                id="formulario-carga"
+            >
+                <div class="campo-archivo">
+
+                    <label for="archivo_csv">
+                        Selecciona un archivo CSV
+                    </label>
+
+                    <input
+                        type="file"
+                        id="archivo_csv"
+                        name="archivo_csv"
+                        accept=".csv,text/csv"
+                        required
+                    >
+
+                    <p class="texto-ayuda">
+                        Formato permitido: CSV. Tamaño máximo:
+                        4 GB.
+                    </p>
+                </div>
+
+                <button
+                    type="submit"
+                    id="boton-procesar"
+                    class="boton boton-principal"
+                >
+                    Procesar dataset
+                </button>
+            </form>
+
+            <div class="columnas-requeridas">
+                <h3>
+                    Columnas compatibles
+                </h3>
+
+                <p class="texto-ayuda">
+                    El sistema reconoce automáticamente los esquemas
+                    nuevo y anterior de TravisTorrent.
+                </p>
+
+                <div class="lista-columnas">
+                    <code>tr_duration</code>
+                    <code>gh_build_started_at / tr_started_at</code>
+                    <code>tr_status</code>
+                    <code>gh_project_name</code>
+                    <code>tr_log_num_tests_run / tr_tests_run</code>
+                    <code>tr_log_num_tests_failed / tr_tests_fail</code>
+                    <code>tr_log_frameworks / tr_frameworks</code>
+                </div>
+            </div>
+        </section>
+
+        {% if mensaje_error %}
+            <section
+                class="mensaje mensaje-error"
+                role="alert"
+            >
+                <div>
+                    <h2>
+                        No fue posible completar el análisis
+                    </h2>
+
+                    <p>
+                        {{ mensaje_error }}
+                    </p>
+                </div>
+            </section>
+        {% endif %}
+
+        {% if resultados %}
+
+            <section
+                class="seccion-resultados"
+                aria-labelledby="titulo-resultados"
+            >
+                <div class="encabezado-resultados">
+                    <div>
+                        <p class="numero-seccion">
+                            Paso 2
+                        </p>
+
+                        <h2 id="titulo-resultados">
+                            Resultados del análisis
+                        </h2>
+
+                        <p>
+                            Archivo procesado:
+                            <strong>
+                                {{ resultados.archivo_original }}
+                            </strong>
+                        </p>
+                    </div>
+
+                    {% if identificador %}
+                        <a
+                            href="{{ url_for(
+                                'descargar_resultados',
+                                identificador=identificador
+                            ) }}"
+                            class="boton boton-descarga"
+                        >
+                            Descargar todos los resultados (.zip)
+                        </a>
+                    {% endif %}
+                </div>
+
+                <div class="rejilla-metricas">
+
+                    <article class="tarjeta-metrica">
+                        <span class="titulo-metrica">
+                            Registros iniciales
+                        </span>
+
+                        <strong class="valor-metrica">
+                            {{
+                                "{:,}".format(
+                                    resultados.registros_iniciales
+                                )
+                            }}
+                        </strong>
+                    </article>
+
+                    <article class="tarjeta-metrica">
+                        <span class="titulo-metrica">
+                            Registros procesados
+                        </span>
+
+                        <strong class="valor-metrica">
+                            {{
+                                "{:,}".format(
+                                    resultados.registros_procesados
+                                )
+                            }}
+                        </strong>
+                    </article>
+
+                    <article class="tarjeta-metrica">
+                        <span class="titulo-metrica">
+                            Registros eliminados
+                        </span>
+
+                        <strong class="valor-metrica">
+                            {{
+                                "{:,}".format(
+                                    resultados.registros_eliminados
+                                )
+                            }}
+                        </strong>
+                    </article>
+
+                    <article class="tarjeta-metrica destacada">
+                        <span class="titulo-metrica">
+                            Outliers detectados
+                        </span>
+
+                        <strong class="valor-metrica">
+                            {{
+                                "{:,}".format(
+                                    resultados.total_outliers
+                                )
+                            }}
+                        </strong>
+                    </article>
+
+                    <article class="tarjeta-metrica destacada">
+                        <span class="titulo-metrica">
+                            Porcentaje de outliers
+                        </span>
+
+                        <strong class="valor-metrica">
+                            {{
+                                "%.2f"|format(
+                                    resultados.porcentaje_outliers
+                                )
+                            }} %
+                        </strong>
+                    </article>
+
+                    <article class="tarjeta-metrica">
+                        <span class="titulo-metrica">
+                            Validación
+                        </span>
+
+                        <strong
+                            class="valor-metrica
+                            {% if resultados.validacion_correcta %}
+                                texto-correcto
+                            {% else %}
+                                texto-error
+                            {% endif %}"
+                        >
+                            {% if resultados.validacion_correcta %}
+                                Correcta
+                            {% else %}
+                                Incorrecta
+                            {% endif %}
+                        </strong>
+                    </article>
+
+                </div>
+            </section>
+
+            <section class="tarjeta">
+                <div class="encabezado-seccion">
+                    <div>
+                        <p class="numero-seccion">
+                            Paso 3
+                        </p>
+
+                        <h2>
+                            Resultados del método IQR
+                        </h2>
+                    </div>
+                </div>
+
+                <div class="contenedor-tabla">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Métrica</th>
+                                <th>Resultado</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            <tr>
+                                <td>Primer cuartil, Q1</td>
+                                <td>
+                                    {{
+                                        "%.2f"|format(
+                                            resultados.q1
+                                        )
+                                    }}
+                                    segundos
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td>Tercer cuartil, Q3</td>
+                                <td>
+                                    {{
+                                        "%.2f"|format(
+                                            resultados.q3
+                                        )
+                                    }}
+                                    segundos
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td>Rango intercuartílico</td>
+                                <td>
+                                    {{
+                                        "%.2f"|format(
+                                            resultados.iqr
+                                        )
+                                    }}
+                                    segundos
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td>Límite inferior</td>
+                                <td>
+                                    {{
+                                        "%.2f"|format(
+                                            resultados.limite_inferior
+                                        )
+                                    }}
+                                    segundos
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td>Límite superior</td>
+                                <td>
+                                    {{
+                                        "%.2f"|format(
+                                            resultados.limite_superior
+                                        )
+                                    }}
+                                    segundos
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td>Outliers inferiores</td>
+                                <td>
+                                    {{
+                                        resultados.outliers_inferiores
+                                    }}
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td>Outliers superiores</td>
+                                <td>
+                                    {{
+                                        resultados.outliers_superiores
+                                    }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="tarjeta seccion-interpretacion">
+                <div class="encabezado-seccion">
+                    <div>
+                        <p class="numero-seccion">
+                            Paso 4
+                        </p>
+
+                        <h2>
+                            Interpretación
+                        </h2>
+                    </div>
+                </div>
+
+                <p class="texto-interpretacion">
+                    {{ interpretacion }}
+                </p>
+
+                <p class="nota-interpretacion">
+                    Una duración elevada no necesariamente implica
+                    que el build haya fallado. También puede relacionarse
+                    con infraestructura lenta, una gran cantidad de
+                    pruebas, configuración del entorno o problemas en
+                    el pipeline.
+                </p>
+            </section>
+
+            <section class="tarjeta">
+                <div class="encabezado-seccion">
+                    <div>
+                        <p class="numero-seccion">
+                            Paso 5
+                        </p>
+
+                        <h2>
+                            Outliers por estado
+                        </h2>
+                    </div>
+                </div>
+
+                {% if resultados.outliers_por_estado %}
+                    <div class="contenedor-tabla">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Estado del build</th>
+                                    <th>Cantidad de outliers</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {% for estado, cantidad in
+                                    resultados.outliers_por_estado.items()
+                                %}
+                                    <tr>
+                                        <td>
+                                            {{ estado }}
+                                        </td>
+
+                                        <td>
+                                            {{
+                                                "{:,}".format(
+                                                    cantidad
+                                                )
+                                            }}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p>
+                        No se encontraron outliers para mostrar.
+                    </p>
+                {% endif %}
+            </section>
+
+            <section
+                class="seccion-graficas"
+                aria-labelledby="titulo-graficas"
+            >
+                <div class="encabezado-seccion">
+                    <div>
+                        <p class="numero-seccion">
+                            Paso 6
+                        </p>
+
+                        <h2 id="titulo-graficas">
+                            Visualizaciones
+                        </h2>
+
+                        <p>
+                            Las gráficas permiten observar la
+                            distribución, los valores atípicos y el
+                            comportamiento temporal de los fallos.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="rejilla-graficas">
+                    {% for grafica in graficas %}
+                        <article class="tarjeta-grafica">
+                            <h3>
+                                {{ grafica.titulo }}
+                            </h3>
+
+                            <a
+                                href="{{ grafica.url }}"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Abrir gráfica en tamaño completo"
+                            >
+                                <img
+                                    src="{{ grafica.url }}"
+                                    alt="{{ grafica.titulo }}"
+                                    loading="lazy"
+                                >
+                            </a>
+                        </article>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <section class="tarjeta seccion-descarga-final">
+                <div>
+                    <p class="numero-seccion">
+                        Paso 7
+                    </p>
+
+                    <h2>
+                        Descargar entrega
+                    </h2>
+
+                    <p>
+                        El archivo ZIP contiene el dataset limpio,
+                        los outliers detectados, el resumen, el log
+                        de ejecución y las siete gráficas.
+                    </p>
+                </div>
+
+                {% if identificador %}
+                    <a
+                        href="{{ url_for(
+                            'descargar_resultados',
+                            identificador=identificador
+                        ) }}"
+                        class="boton boton-descarga"
+                    >
+                        Descargar todos los resultados (.zip)
+                    </a>
+                {% endif %}
+            </section>
+
+        {% endif %}
+
+    </main>
+
+    <footer class="pie-pagina">
+        <div class="contenedor">
+            <p>
+                Sistema académico de detección de anomalías
+                mediante rango intercuartílico.
+            </p>
+        </div>
+    </footer>
+
+    <div
+        id="pantalla-carga"
+        class="pantalla-carga"
+        aria-hidden="true"
+        role="status"
+        aria-live="polite"
+    >
+        <div class="ventana-progreso">
+
+            <div class="icono-procesamiento"></div>
+
+            <h2 id="titulo-progreso">
+                Cargando archivo
+            </h2>
+
+            <p id="mensaje-progreso">
+                Preparando el archivo para enviarlo.
+            </p>
+
+            <div class="contenedor-barra-progreso">
+                <div
+                    id="barra-progreso"
+                    class="barra-progreso"
+                ></div>
+            </div>
+
+            <div class="informacion-progreso">
+                <strong id="porcentaje-progreso">
+                    0 %
+                </strong>
+
+                <span id="tiempo-transcurrido">
+                    Tiempo transcurrido: 00:00
+                </span>
+            </div>
+
+            <p class="advertencia-progreso">
+                Los archivos grandes pueden tardar varios minutos.
+                No cierres ni actualices esta página.
+            </p>
+
+        </div>
+    </div>
+
+    <script
+        src="{{ url_for(
+            'static',
+            filename='js/progreso.js'
+        ) }}"
+    ></script>
+
+</body>
+</html>
